@@ -1,25 +1,22 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
-	"time"
+	"os"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func main() {
-	// TODO: add configuration flag --bot-api-key
-	// TODO: configure logging
-	// TODO: create single mode bot
-	// TODO: support pause
 	var apiToken string
 	flag.StringVar(&apiToken, "bot-api-key", "", "Bot API key")
 	flag.Parse()
 
 	if apiToken == "" {
-		// TODO: throw panic
-		return
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	bot, err := tgbotapi.NewBotAPI(apiToken)
@@ -29,24 +26,36 @@ func main() {
 
 	bot.Debug = true
 
-	log.Printf("Authorized on account %s", bot.Self.UserName)
-
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message != nil { // If we got a message
-			log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
+		if update.Message != nil {
+			if !update.Message.IsCommand() {
+				continue
+			}
 
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
-			msg.ReplyToMessageID = update.Message.MessageID
-
-			go func() {
-				time.Sleep(5 * time.Second)
-				bot.Send(msg)
-			}()
+			chatID := update.Message.Chat.ID
+			switch update.Message.Command() {
+			case "new":
+				time := update.Message.CommandArguments()
+				ctx, cancel := context.WithCancel(context.Background())
+				t := NewTask(chatID, cancel, time)
+				tasks.Place(chatID, t)
+				t.Run(ctx, bot)
+			case "cancel":
+				tasks.cancel(chatID)
+			case "pause":
+				tasks.pause(chatID)
+				bot.Send(tgbotapi.NewMessage(chatID, hookahPausedMsg))
+			case "resume":
+				tasks.resume(chatID)
+				bot.Send(tgbotapi.NewMessage(chatID, hookahResumedMsg))
+			case "skip":
+				tasks.skip(chatID)
+			}
 		}
 	}
 }
