@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -55,6 +56,18 @@ func main() {
 				bot.Send(tgbotapi.NewMessage(chatID, hookahResumedMsg))
 			case "skip":
 				tasks.skip(chatID)
+			case "setparty":
+				party := update.Message.CommandArguments()
+				queue, err := newQueue(party)
+				if err != nil {
+					fmt.Printf("new party is wrong: %s\n", party)
+				}
+				err = tasks.setParty(chatID, queue)
+				if err != nil {
+					bot.Send(tgbotapi.NewMessage(chatID, err.Error()))
+					continue
+				}
+				bot.Send(tgbotapi.NewMessage(chatID, queue.print()))
 			}
 		}
 	}

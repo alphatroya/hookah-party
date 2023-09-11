@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -14,7 +16,10 @@ const (
 	TaskStagePhase TaskStage = iota
 )
 
-func (t TaskStage) Message() string {
+func (t TaskStage) Message(name *string) string {
+	if name != nil {
+		return fmt.Sprintf(hookahNextUserMsg, *name)
+	}
 	return hookahNextMsg
 }
 
@@ -24,9 +29,8 @@ type Task struct {
 	cancel         context.CancelFunc
 	nextStageDelay time.Duration
 	isPaused       bool
-	skipCh         chan struct {
-		silent bool
-	}
+	queue          *queue
+	skipCh         chan struct{}
 }
 
 func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
@@ -39,7 +43,7 @@ func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
 	}
 	t.nextStageDelay = delay
 	t.taskStage = TaskStagePhase
-	t.skipCh = make(chan struct{ silent bool })
+	t.skipCh = make(chan struct{})
 	return t
 }
 
@@ -47,17 +51,28 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 	bot.Send(tgbotapi.NewMessage(t.chatID, hookahStartedMsg+durafmt.Parse(t.nextStageDelay).String()))
 	go func() {
 		for {
-			select {
-			case s := <-t.skipCh:
-				if !s.silent {
-					bot.Send(tgbotapi.NewMessage(t.chatID, hookahStageSkippedMsg))
-				}
-			case <-time.After(t.nextStageDelay):
+			f := func() {
 				if t.isPaused {
-					continue
+					return
 				}
-				message := t.taskStage.Message()
+				var message string
+				if t.queue != nil {
+					next := "@" + t.queue.next()
+					message = t.taskStage.Message(&next)
+					message += "\n"
+					message += "\n"
+					message += t.queue.print()
+				} else {
+					message = t.taskStage.Message(nil)
+				}
 				bot.Send(tgbotapi.NewMessage(t.chatID, message))
+			}
+
+			select {
+			case <-t.skipCh:
+				f()
+			case <-time.After(t.nextStageDelay):
+				f()
 			case <-ctx.Done():
 				return
 			}
@@ -71,15 +86,47 @@ func (t *Task) pause() {
 
 func (t *Task) resume() {
 	t.isPaused = false
-	t.skipCh <- struct {
-		silent bool
-	}{
-		silent: true,
-	}
+	t.skipCh <- struct{}{}
 }
 
 func (t *Task) skip() {
-	t.skipCh <- struct {
-		silent bool
-	}{}
+	t.skipCh <- struct{}{}
+}
+
+type queue struct {
+	users []string
+	head  int
+}
+
+func newQueue(command string) (*queue, error) {
+	components := strings.Split(command, " ")
+	if len(components) == 0 {
+		return nil, fmt.Errorf("queue is empty, command=%s", command)
+	}
+	q := new(queue)
+	q.users = components
+	return q, nil
+}
+
+func (q *queue) next() string {
+	q.head++
+	if q.head >= len(q.users) {
+		q.head = 0
+	}
+	return q.users[q.head]
+}
+
+func (q *queue) print() string {
+	if len(q.users) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for i, user := range q.users {
+		if i == q.head {
+			builder.WriteString(user + " 🌬️" + "\n")
+			continue
+		}
+		builder.WriteString(user + "\n")
+	}
+	return builder.String()
 }
