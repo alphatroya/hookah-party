@@ -3,7 +3,7 @@ package main
 const (
 	hookahStartedMsg      = "Кальян запущен 💨, длительность покура: "
 	hookahNextMsg         = "Передавай трубочку 🌬️"
-	hookahNextUserMsg     = "Забирай трубочку %s"
+	hookahNextUserMsg     = "@%s забирай трубочку у @%s"
 	hookahPausedMsg       = "Кальян поставлен на паузу"
 	hookahResumedMsg      = "Кальян снова в деле"
 	hookahStageSkippedMsg = "Следующий"

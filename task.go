@@ -12,13 +12,11 @@ import (
 
 type TaskStage int
 
-const (
-	TaskStagePhase TaskStage = iota
-)
+const TaskStagePhase TaskStage = iota
 
-func (t TaskStage) Message(name *string) string {
-	if name != nil {
-		return fmt.Sprintf(hookahNextUserMsg, *name)
+func (t TaskStage) Message(prev, next *string) string {
+	if prev != nil && next != nil && *prev != *next {
+		return fmt.Sprintf(hookahNextUserMsg, *prev, *next)
 	}
 	return hookahNextMsg
 }
@@ -30,7 +28,11 @@ type Task struct {
 	nextStageDelay time.Duration
 	isPaused       bool
 	queue          *queue
-	skipCh         chan struct{}
+	skipCh         chan taskSkip
+}
+
+type taskSkip struct {
+	resume bool
 }
 
 func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
@@ -43,7 +45,7 @@ func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
 	}
 	t.nextStageDelay = delay
 	t.taskStage = TaskStagePhase
-	t.skipCh = make(chan struct{})
+	t.skipCh = make(chan taskSkip)
 	return t
 }
 
@@ -57,19 +59,22 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 				}
 				var message string
 				if t.queue != nil {
-					next := "@" + t.queue.next()
-					message = t.taskStage.Message(&next)
+					prev, next := t.queue.next()
+					message = t.taskStage.Message(&next, &prev)
 					message += "\n"
 					message += "\n"
 					message += t.queue.print()
 				} else {
-					message = t.taskStage.Message(nil)
+					message = t.taskStage.Message(nil, nil)
 				}
 				bot.Send(tgbotapi.NewMessage(t.chatID, message))
 			}
 
 			select {
-			case <-t.skipCh:
+			case s := <-t.skipCh:
+				if s.resume {
+					continue
+				}
 				f()
 			case <-time.After(t.nextStageDelay):
 				f()
@@ -86,11 +91,11 @@ func (t *Task) pause() {
 
 func (t *Task) resume() {
 	t.isPaused = false
-	t.skipCh <- struct{}{}
+	t.skipCh <- taskSkip{resume: true}
 }
 
 func (t *Task) skip() {
-	t.skipCh <- struct{}{}
+	t.skipCh <- taskSkip{}
 }
 
 type queue struct {
@@ -108,12 +113,13 @@ func newQueue(command string) (*queue, error) {
 	return q, nil
 }
 
-func (q *queue) next() string {
+func (q *queue) next() (string, string) {
+	prev := q.users[q.head]
 	q.head++
 	if q.head >= len(q.users) {
 		q.head = 0
 	}
-	return q.users[q.head]
+	return prev, q.users[q.head]
 }
 
 func (q *queue) print() string {
