@@ -42,10 +42,7 @@ func main() {
 			switch update.Message.Command() {
 			case "new":
 				time := update.Message.CommandArguments()
-				ctx, cancel := context.WithCancel(context.Background())
-				t := NewTask(chatID, cancel, time)
-				tasks.Place(chatID, t)
-				t.Run(ctx, bot)
+				createNewTask(chatID, time, bot)
 			case "cancel":
 				tasks.cancel(chatID)
 			case "pause":
@@ -64,11 +61,17 @@ func main() {
 				}
 				err = tasks.setParty(chatID, queue)
 				if err != nil {
-					bot.Send(tgbotapi.NewMessage(chatID, err.Error()))
-					continue
+					createNewTask(chatID, "", bot)
 				}
 				bot.Send(tgbotapi.NewMessage(chatID, queue.print()))
 			}
 		}
 	}
+}
+
+func createNewTask(chatID int64, time string, bot *tgbotapi.BotAPI) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t := NewTask(chatID, cancel, time)
+	tasks.Place(chatID, t)
+	t.Run(ctx, bot)
 }

@@ -41,7 +41,7 @@ func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
 	t.cancel = cancel
 	delay, err := time.ParseDuration(timeString)
 	if err != nil {
-		delay = 90 * time.Second
+		delay = 160 * time.Second
 	}
 	t.nextStageDelay = delay
 	t.taskStage = TaskStagePhase
