@@ -21,11 +21,12 @@ func (s *storage) Place(chat int64, t *Task) {
 	s.x[chat] = t
 }
 
-func (s *storage) cancel(chat int64) {
+func (s *storage) cancel(chatID int64) {
 	s.Lock()
 	defer s.Unlock()
-	if prev, ok := s.x[chat]; ok {
+	if prev, ok := s.x[chatID]; ok {
 		prev.cancel()
+		delete(s.x, chatID)
 	}
 }
 
