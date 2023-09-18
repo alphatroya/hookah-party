@@ -108,8 +108,14 @@ func newQueue(command string) (*queue, error) {
 	if len(components) == 0 {
 		return nil, fmt.Errorf("queue is empty, command=%s", command)
 	}
+	filterEmpty := make([]string, 0, len(components))
+	for _, component := range components {
+		if component != "" {
+			filterEmpty = append(filterEmpty, component)
+		}
+	}
 	q := new(queue)
-	q.users = components
+	q.users = filterEmpty
 	return q, nil
 }
 
