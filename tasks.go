@@ -53,7 +53,7 @@ func (s *storage) setParty(chat int64, party *queue) error {
 		prev.queue = party
 		return nil
 	}
-	return errors.New("кальян и не запущен")
+	return errors.New("кальян не запущен")
 }
 
 func (s *storage) skip(chat int64) {

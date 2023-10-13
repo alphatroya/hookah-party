@@ -62,6 +62,7 @@ func main() {
 				err = tasks.setParty(chatID, queue)
 				if err != nil {
 					createNewTask(chatID, "", bot)
+					_ = tasks.setParty(chatID, queue)
 				}
 				bot.Send(tgbotapi.NewMessage(chatID, queue.print()))
 			}
