@@ -53,6 +53,8 @@ func main() {
 				bot.Send(tgbotapi.NewMessage(chatID, hookahResumedMsg))
 			case "skip":
 				tasks.skip(chatID)
+			case "help", "start":
+				printHelp(chatID, bot)
 			case "setparty":
 				party := update.Message.CommandArguments()
 				queue, err := newQueue(party)
@@ -68,6 +70,24 @@ func main() {
 			}
 		}
 	}
+}
+
+func printHelp(chatID int64, bot *tgbotapi.BotAPI) {
+	const help = `
+- /new - запускает новую сессию кальяна и принимает параметр продолжительности цикла, например, 2м30с - каждый участник курит кальян по 2 минуты 30 секунд.
+    - Если значение не указано, то используется значение по умолчанию - 2 минуты 40 секунд.
+
+- /setparty - устанавливает очередь пользователей, например, "/setparty 1 2 3" устанавливает очередь из пользователей @1 @2 и @3.
+    - При каждом срабатывании таймера бот обращается к текущему и следующему пользователю в очереди.
+    - Если кальян не запущен, то он запускается с продолжительностью по умолчанию.
+
+- /pause - приостанавливает сессию кальяна.
+
+- /resume - возобновляет приостановленную сессию кальяна, и очередь текущего пользователя начинается сначала.
+
+- /skip - сбрасывает текущего пользователя, и очередь переходит к следующему пользователю в очереди.
+`
+	bot.Send(tgbotapi.NewMessage(chatID, help))
 }
 
 func createNewTask(chatID int64, time string, bot *tgbotapi.BotAPI) {
