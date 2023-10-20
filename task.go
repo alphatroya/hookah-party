@@ -22,13 +22,19 @@ func (t TaskStage) Message(prev, next *string) string {
 }
 
 type Task struct {
-	taskStage      TaskStage
-	chatID         int64
-	cancel         context.CancelFunc
-	nextStageDelay time.Duration
+	taskStage TaskStage
+	chatID    int64
+	cancel    context.CancelFunc
+
+	stageBegin    time.Time
+	stageEnd      time.Time
+	phaseDuration string
+
 	isPaused       bool
-	queue          *queue
-	skipCh         chan taskSkip
+	leftAfterPause time.Duration
+
+	queue  *queue
+	skipCh chan taskSkip
 }
 
 type taskSkip struct {
@@ -39,18 +45,24 @@ func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
 	t := new(Task)
 	t.chatID = chatID
 	t.cancel = cancel
-	delay, err := time.ParseDuration(timeString)
-	if err != nil {
-		delay = 160 * time.Second
-	}
-	t.nextStageDelay = delay
+	t.phaseDuration = timeString
+	t.scheduleStage()
 	t.taskStage = TaskStagePhase
 	t.skipCh = make(chan taskSkip)
 	return t
 }
 
+func (t *Task) scheduleStage() {
+	t.stageBegin = time.Now()
+	delay, err := time.ParseDuration(t.phaseDuration)
+	if err != nil {
+		delay = 160 * time.Second
+	}
+	t.stageEnd = t.stageBegin.Add(delay)
+}
+
 func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
-	bot.Send(tgbotapi.NewMessage(t.chatID, hookahStartedMsg+durafmt.Parse(t.nextStageDelay).String()))
+	bot.Send(tgbotapi.NewMessage(t.chatID, hookahStartedMsg+durafmt.Parse(t.stageEnd.Sub(t.stageBegin)).String()))
 	go func() {
 		for {
 			f := func() {
@@ -68,6 +80,7 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 					message = t.taskStage.Message(nil, nil)
 				}
 				bot.Send(tgbotapi.NewMessage(t.chatID, message))
+				t.scheduleStage()
 			}
 
 			select {
@@ -76,7 +89,7 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 					continue
 				}
 				f()
-			case <-time.After(t.nextStageDelay):
+			case <-time.After(t.stageEnd.Sub(t.stageBegin)):
 				f()
 			case <-ctx.Done():
 				return
@@ -86,11 +99,14 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 }
 
 func (t *Task) pause() {
+	t.leftAfterPause = time.Until(t.stageEnd)
 	t.isPaused = true
 }
 
 func (t *Task) resume() {
 	t.isPaused = false
+	t.stageBegin = time.Now()
+	t.stageEnd = t.stageBegin.Add(t.leftAfterPause)
 	t.skipCh <- taskSkip{resume: true}
 }
 
