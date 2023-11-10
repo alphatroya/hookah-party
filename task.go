@@ -23,7 +23,9 @@ func (t TaskStage) Message(prev, next *string) string {
 
 type Task struct {
 	taskStage TaskStage
+	draft     bool
 	chatID    int64
+	messageID int
 	cancel    context.CancelFunc
 
 	stageBegin    time.Time
@@ -41,12 +43,16 @@ type taskSkip struct {
 	resume bool
 }
 
-func NewTask(chatID int64, cancel context.CancelFunc, timeString string) *Task {
+func NewTaskDraft(chatID int64, timeString string) *Task {
 	t := new(Task)
+	t.cancel = func() {}
+	t.draft = true
 	t.chatID = chatID
-	t.cancel = cancel
-	t.phaseDuration = timeString
-	t.scheduleStage()
+	if timeString == "" {
+		t.phaseDuration = "160s"
+	} else {
+		t.phaseDuration = timeString
+	}
 	t.taskStage = TaskStagePhase
 	t.skipCh = make(chan taskSkip)
 	return t
@@ -61,7 +67,45 @@ func (t *Task) scheduleStage() {
 	t.stageEnd = t.stageBegin.Add(delay)
 }
 
-func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
+func (t *Task) preview() string {
+	preview := "Создаем покур:\n"
+	if duration, err := time.ParseDuration(t.phaseDuration); err == nil {
+		preview += "\tДлительность: " + durafmt.Parse(duration).String() + "\n"
+	}
+	if queue := t.queue; queue != nil && len(queue.users) != 0 {
+		preview += "\tОчередь:\n"
+		for i, user := range queue.users {
+			preview += fmt.Sprintf("\t\t%d: %s", i+1, user)
+			if queue.head == i {
+				preview += " 🌬️"
+			}
+			preview += "\n"
+		}
+	}
+	return preview
+}
+
+func (t *Task) addOrRemoveUserToQueue(user string) {
+	if t.queue == nil {
+		t.queue = new(queue)
+	}
+	for i, v := range t.queue.users {
+		if v == user {
+			t.queue.users = append(t.queue.users[:i], t.queue.users[i+1:]...)
+			if t.queue.head == len(t.queue.users) {
+				t.queue.head--
+			}
+			return
+		}
+	}
+	t.queue.users = append(t.queue.users, user)
+}
+
+func (t *Task) Run(ctx context.Context, cancel context.CancelFunc, bot *tgbotapi.BotAPI) {
+	t.cancel = cancel
+	t.draft = false
+	t.scheduleStage()
+
 	bot.Send(tgbotapi.NewMessage(t.chatID, hookahStartedMsg+durafmt.Parse(t.stageEnd.Sub(t.stageBegin)).String()))
 	go func() {
 		for {
