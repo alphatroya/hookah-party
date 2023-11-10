@@ -27,9 +27,9 @@ func (s *storage) Place(chat int64, t *Task) {
 func (s *storage) cancel(chatID int64) {
 	s.Lock()
 	defer s.Unlock()
-	if prev, ok := s.tasks[chatID]; ok {
-		prev.cancel()
-		delete(s.tasks, chatID)
+	if task, ok := s.tasks[chatID]; ok {
+		task.state = stateCancelled
+		task.cancel()
 	}
 }
 

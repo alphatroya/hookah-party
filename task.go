@@ -10,23 +10,20 @@ import (
 	"github.com/hako/durafmt"
 )
 
-type TaskStage int
+type state string
 
-const TaskStagePhase TaskStage = iota
-
-func (t TaskStage) Message(prev, next *string) string {
-	if prev != nil && next != nil && *prev != *next {
-		return fmt.Sprintf(hookahNextUserMsg, *prev, *next)
-	}
-	return hookahNextMsg
-}
+const (
+	stateDraft     state = "draft"
+	stateRun       state = "run"
+	stateCancelled state = "cancelled"
+)
 
 type Task struct {
-	taskStage TaskStage
-	draft     bool
-	chatID    int64
-	messageID int
-	cancel    context.CancelFunc
+	state             state
+	chatID            int64
+	messageID         int
+	lastCallMessageID *int
+	cancel            context.CancelFunc
 
 	stageBegin    time.Time
 	stageEnd      time.Time
@@ -43,17 +40,12 @@ type taskSkip struct {
 	resume bool
 }
 
-func NewTaskDraft(chatID int64, timeString string) *Task {
+func NewTaskDraft(chatID int64) *Task {
 	t := new(Task)
 	t.cancel = func() {}
-	t.draft = true
+	t.state = stateDraft
 	t.chatID = chatID
-	if timeString == "" {
-		t.phaseDuration = "160s"
-	} else {
-		t.phaseDuration = timeString
-	}
-	t.taskStage = TaskStagePhase
+	t.phaseDuration = durationStandard
 	t.skipCh = make(chan taskSkip)
 	return t
 }
@@ -68,9 +60,18 @@ func (t *Task) scheduleStage() {
 }
 
 func (t *Task) preview() string {
-	preview := "Создаем покур:\n"
+	var preview string
+	switch t.state {
+	case stateDraft:
+		preview = "Новый кальян 🪩\n\n"
+	case stateRun:
+		preview = "Кальян запущен 💨\n\n"
+	case stateCancelled:
+		preview = "Кальян отмемён 💨\n\n"
+		return preview
+	}
 	if duration, err := time.ParseDuration(t.phaseDuration); err == nil {
-		preview += "\tДлительность: " + durafmt.Parse(duration).String() + "\n"
+		preview += "\tДлительность: " + durafmt.Parse(duration).String() + "\n\n"
 	}
 	if queue := t.queue; queue != nil && len(queue.users) != 0 {
 		preview += "\tОчередь:\n"
@@ -103,27 +104,39 @@ func (t *Task) addOrRemoveUserToQueue(user string) {
 
 func (t *Task) Run(ctx context.Context, cancel context.CancelFunc, bot *tgbotapi.BotAPI) {
 	t.cancel = cancel
-	t.draft = false
+	t.state = stateRun
 	t.scheduleStage()
 
-	bot.Send(tgbotapi.NewMessage(t.chatID, hookahStartedMsg+durafmt.Parse(t.stageEnd.Sub(t.stageBegin)).String()))
+	messageGen := func(prev, next *string) string {
+		if prev != nil && next != nil && *prev != *next {
+			return fmt.Sprintf(hookahNextUserMsg, *prev, *next)
+		}
+		return hookahNextMsg
+	}
+
 	go func() {
 		for {
 			f := func() {
 				if t.isPaused {
 					return
 				}
+				if t.lastCallMessageID != nil {
+					message := tgbotapi.NewDeleteMessage(t.chatID, *t.lastCallMessageID)
+					bot.Send(message)
+				}
 				var message string
 				if t.queue != nil {
 					prev, next := t.queue.next()
-					message = t.taskStage.Message(&next, &prev)
+					message = messageGen(&next, &prev)
 					message += "\n"
 					message += "\n"
 					message += t.queue.print()
 				} else {
-					message = t.taskStage.Message(nil, nil)
+					message = messageGen(nil, nil)
 				}
-				bot.Send(tgbotapi.NewMessage(t.chatID, message))
+				if messageParams, err := bot.Send(tgbotapi.NewMessage(t.chatID, message)); err == nil {
+					t.lastCallMessageID = &messageParams.MessageID
+				}
 				t.scheduleStage()
 			}
 

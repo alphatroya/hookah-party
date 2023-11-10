@@ -40,10 +40,7 @@ func main() {
 			chatID := update.Message.Chat.ID
 			switch update.Message.Command() {
 			case "new":
-				time := update.Message.CommandArguments()
-				createNewTask(chatID, time, bot)
-			case "cancel":
-				tasks.cancel(chatID)
+				createNewTask(chatID, bot)
 			case "pause":
 				tasks.pause(chatID)
 				bot.Send(tgbotapi.NewMessage(chatID, hookahPausedMsg))
@@ -70,7 +67,10 @@ func main() {
 	}
 }
 
-const queueCallbackPrefix = "queue-"
+const (
+	queueCallbackPrefix    = "queue-"
+	durationCallbackPrefix = "duration-"
+)
 
 func handleCallback(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, chatID int64) {
 	callbackData := query.Data
@@ -78,10 +78,17 @@ func handleCallback(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, chatID 
 	switch callbackData {
 	case "run":
 		tasks.run(chatID, bot)
+	case "cancel":
+		tasks.cancel(chatID)
 	default:
-		user := strings.TrimPrefix(callbackData, queueCallbackPrefix)
 		if task, ok := tasks.get(chatID); ok {
-			task.addOrRemoveUserToQueue(user)
+			if strings.HasPrefix(callbackData, queueCallbackPrefix) {
+				user := strings.TrimPrefix(callbackData, queueCallbackPrefix)
+				task.addOrRemoveUserToQueue(user)
+			} else if strings.HasPrefix(callbackData, durationCallbackPrefix) {
+				duration := strings.TrimPrefix(callbackData, durationCallbackPrefix)
+				task.phaseDuration = duration
+			}
 		}
 	}
 
@@ -115,14 +122,14 @@ func printHelp(chatID int64, bot *tgbotapi.BotAPI) {
 	bot.Send(tgbotapi.NewMessage(chatID, help))
 }
 
-func createNewTask(chatID int64, time string, bot *tgbotapi.BotAPI) {
-	t := NewTaskDraft(chatID, time)
-	tasks.Place(chatID, t)
+func createNewTask(chatID int64, bot *tgbotapi.BotAPI) {
+	task := NewTaskDraft(chatID)
+	tasks.Place(chatID, task)
 
-	msg := tgbotapi.NewMessage(chatID, t.preview())
+	msg := tgbotapi.NewMessage(chatID, task.preview())
 	msg.ReplyMarkup = numericKeyboard(chatID)
 	if message, err := bot.Send(msg); err == nil {
-		t.messageID = message.MessageID
+		task.messageID = message.MessageID
 	}
 }
 
@@ -136,11 +143,27 @@ func numericKeyboard(chatID int64) *tgbotapi.InlineKeyboardMarkup {
 		numericKeyboard.InlineKeyboard = append(numericKeyboard.InlineKeyboard, usersButton)
 	}
 
-	if t, ok := tasks.get(chatID); ok && t.draft {
-		runRow := tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Run", "run"),
-		)
-		numericKeyboard.InlineKeyboard = append(numericKeyboard.InlineKeyboard, runRow)
+	if t, ok := tasks.get(chatID); ok {
+		switch t.state {
+		case stateDraft:
+			numericKeyboard.InlineKeyboard = append(numericKeyboard.InlineKeyboard, []tgbotapi.InlineKeyboardButton{
+				tgbotapi.NewInlineKeyboardButtonData(durationStandard, durationCallbackPrefix+durationStandard),
+				tgbotapi.NewInlineKeyboardButtonData(durationExtended, durationCallbackPrefix+durationExtended),
+				tgbotapi.NewInlineKeyboardButtonData(durationLarge, durationCallbackPrefix+durationLarge),
+			})
+			runRow := tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Run", "run"),
+			)
+			numericKeyboard.InlineKeyboard = append(numericKeyboard.InlineKeyboard, runRow)
+		case stateRun:
+			numericKeyboard.InlineKeyboard = append(numericKeyboard.InlineKeyboard, []tgbotapi.InlineKeyboardButton{
+				tgbotapi.NewInlineKeyboardButtonData("Cancel", "cancel"),
+			})
+		case stateCancelled:
+		}
+	}
+	if len(numericKeyboard.InlineKeyboard) == 0 {
+		return nil
 	}
 	return &numericKeyboard
 }
