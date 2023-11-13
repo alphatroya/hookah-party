@@ -29,6 +29,7 @@ type Task struct {
 	stageBegin    time.Time
 	stageEnd      time.Time
 	phaseDuration string
+	lastMessageID *int
 
 	isPaused       bool
 	leftAfterPause time.Duration
@@ -69,6 +70,9 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 				if t.isPaused {
 					return
 				}
+				if lastMessageID := t.lastMessageID; lastMessageID != nil {
+					bot.Send(tgbotapi.NewDeleteMessage(t.chatID, *lastMessageID))
+				}
 				var message string
 				if t.queue != nil {
 					prev, next := t.queue.next()
@@ -79,7 +83,9 @@ func (t *Task) Run(ctx context.Context, bot *tgbotapi.BotAPI) {
 				} else {
 					message = t.taskStage.Message(nil, nil)
 				}
-				bot.Send(tgbotapi.NewMessage(t.chatID, message))
+				if messageInfo, err := bot.Send(tgbotapi.NewMessage(t.chatID, message)); err == nil {
+					t.lastMessageID = &messageInfo.MessageID
+				}
 				t.scheduleStage()
 			}
 
